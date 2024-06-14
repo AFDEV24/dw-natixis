@@ -1,14 +1,14 @@
 from pydantic import BaseModel
 
+from src.models.base import FundMetadata
 
-class CreateEmbeddingsRequest(BaseModel):
+
+class CreateEmbeddingsRequest(BaseModel, FundMetadata):
     client: str
     project: str
-    # urls: list[str]
 
 
 class QueryRequest(BaseModel):
     client: str
     project: str
     query: str
-    file_name: str | None = None

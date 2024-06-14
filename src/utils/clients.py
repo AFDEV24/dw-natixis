@@ -26,7 +26,7 @@ def get_openai_client() -> OpenAIClient:
     return OpenAIClient(api_key=ENV["OPENAI_API_KEY"])
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=16)
 def get_bedrock_client() -> Any:  # tmp typing
     return boto3.client(
         "bedrock-runtime",
@@ -52,11 +52,11 @@ def get_minio_client() -> Minio:
 
 
 @lru_cache(maxsize=2)
-def get_pinecone_client() -> Pinecone:
+def get_pinecone_client(threads: int = 30) -> Pinecone:
     """
     Configure and serve Pinecone client. Client is cached for reuse.
     """
-    return Pinecone(api_key=ENV["PINECONE_API_KEY"])
+    return Pinecone(api_key=ENV["PINECONE_API_KEY"], pool_threads=threads)
 
 
 @alru_cache(maxsize=8)  # Can increase cache size if we have more indexes

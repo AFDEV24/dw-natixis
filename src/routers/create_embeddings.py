@@ -1,20 +1,23 @@
 import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter
 from langchain_core.documents import Document
-from pinecone import Index  # type: ignore
+from pinecone import Index, Vector
 
 from src.models.requests import CreateEmbeddingsRequest
 from src.models.response import CreateEmbeddingsResponse
-from src.utils.embeddings import get_lc_pinecone
-from src.utils.clients import get_pinecone_index, get_bedrock_client
+from src.models.pinecone import PineconeMetadata
+from src.utils.embeddings import embed_openai
+from src.utils.clients import get_pinecone_index, get_openai_client, OpenAIClient
 from src.utils.decorators import async_retry
 from src.utils.hashers import hash_string
 from src.utils.logger import get_logger
 from src.utils.parsers import parse_pdf, statistically_chunk_content
-from src import ENV
+
+# from src import ENV, DIMENSIONS
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 router = APIRouter()
@@ -50,7 +53,8 @@ async def create_embeddings(
         7. Uploads the embeddings to the vector database.
     """
     # Get pinecone index, create if it doesnt exist for client
-    index = await get_pinecone_index(request.client)
+    pc_index = await get_pinecone_index(request.client)
+    openai_client = get_openai_client()
     file_ids: dict[str, tuple[list[str], int]] = {}
     # for url in request.urls:
 
@@ -79,11 +83,11 @@ async def create_embeddings(
         logger.info(f"Split content into {len(chunks)} chunks.")
 
         # Add metadata to documents and generate ids for vectors manually
-        ids, documents = _add_metadata(chunks, file_name, timestamp)
+        ids, documents = _add_metadata(request, chunks, file_name, timestamp)
         file_ids[file_name] = (ids, timestamp)
 
         # Upload embeddings to vector db
-        await _upload_to_pinecone(index, request.client, request.project, documents, ids)
+        await _upload_to_pinecone(pc_index, openai_client, documents, ids, request.project)
 
     return CreateEmbeddingsResponse(
         ids=file_ids,
@@ -163,7 +167,9 @@ async def create_embeddings(
 #     return {idx: Document(page_content=content) for idx, content in contents.items()}
 
 
-def _add_metadata(chunks: list[tuple[int, str]], file_name: str, timestamp: int) -> tuple[list[str], list[Document]]:
+def _add_metadata(
+    request: CreateEmbeddingsRequest, chunks: list[tuple[int, str]], file_name: str, timestamp: int
+) -> tuple[list[str], list[Document]]:
     """
     Adds metadata to each document in the provided list and generates unique IDs for each document chunk.
 
@@ -179,17 +185,30 @@ def _add_metadata(chunks: list[tuple[int, str]], file_name: str, timestamp: int)
     """
     ids: list[str] = []
     documents: list[Document] = []
-    for idx, chunk in enumerate(chunks):
+    for chunk_number, chunk in enumerate(chunks):
         page_num, text = chunk
-        metadata = {"chunk_id": idx, "name": file_name, "timestamp": timestamp, "page": page_num}
-        documents.append(Document(page_content=text, metadata=metadata))
-        ids.append(hash_string(f"{idx}_{file_name}"))  # Hash ids so that we can represent doc name in ASCII
+        metadata = PineconeMetadata(
+            region=request.region,
+            fund_name=request.fund_name,
+            date=request.date,
+            chunk_id=chunk_number,
+            name=file_name,
+            timestamp=timestamp,
+            text=text,
+            page=page_num,
+        )
+        documents.append(Document(page_content=text, metadata=asdict(metadata)))
+        ids.append(hash_string(f"{request.date}{request.fund_name}{file_name}{page_num}{chunk_number}"))
     return (ids, documents)
 
 
-@async_retry(logger=logger, max_attempts=1, initial_delay=1, backoff_base=2)
+# @async_retry(logger=logger, max_attempts=1, initial_delay=1, backoff_base=2)
 async def _upload_to_pinecone(
-    index: Index, client: str, project: str, documents: list[Document], ids: list[str]
+    index: Index,
+    openai_client: OpenAIClient,
+    documents: list[Document],
+    ids: list[str],
+    project: str,
 ) -> None:
     """
     Internal function to upload documents to a Pinecone index with retries in case of failures.
@@ -201,16 +220,18 @@ async def _upload_to_pinecone(
         documents (list[Document]): List of chunked documents to upload.
         ids (list[str]): The list of IDs corresponding to the documents in order.
     """
+    # dimensions: int = index.describe_index_stats().dimension
     start = time.time()
-    if ENV["OPENAI_API_KEY"] != "dummykey":
-        print("@@@ USING OPENAI")
-        aws_client = None
-    else:
-        print("@@@ USING AWS")
-        aws_client = get_bedrock_client()
-    lc_pinecone = get_lc_pinecone(index, project, aws_client)
-    await lc_pinecone.aadd_documents(documents=documents, ids=ids)  # Adds chunked documents with upsert async
+    content_vectors = await embed_openai(openai_client, [doc.page_content for doc in documents], 2772)
+    # Hardcoding 10% weighting for metadata in embedding
+    metadata_vectors = await embed_openai(openai_client, [str(doc.metadata) for doc in documents], 300)
+    # Concate vectorspaces
+    concate_vectors = [content_vector + metadata_vectors[idx] for idx, content_vector in enumerate(content_vectors)]
+    logger.info(f"Took {round(time.time()-start, 2)}s to embed {len(concate_vectors)} documents and metadata.")
 
-    logger.info(
-        f"Took {round(time.time()-start, 2)}s to embed and upsert documents to index: '{client}' namespace: '{project}'."
-    )
+    start = time.time()
+    vectors = [
+        Vector(id=ids[idx], values=concate_vectors[idx], metadata=doc.metadata) for idx, doc in enumerate(documents)
+    ]
+    index.upsert(vectors, namespace=project)
+    logger.info(f"Took {round(time.time()-start, 2)}s to upsert {len(vectors)} documents.")

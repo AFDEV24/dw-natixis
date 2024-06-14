@@ -14,7 +14,7 @@ from src.utils.embeddings import embed_openai
 from src.utils.clients import get_pinecone_index, get_openai_client, get_cohere_client
 from src.utils.logger import get_logger
 from src.utils.parsers import rerank
-from src import ENV
+from src import ENV, DIMENSIONS
 
 router = APIRouter()
 logger = get_logger(file_path=Path(__file__).parent.parent.parent / "etc" / "logs")
@@ -40,7 +40,7 @@ async def query(request: QueryRequest) -> QueryResponse:
     """
     openai_client = get_openai_client()
     # Embed question
-    embedded_queries = await embed_openai(openai_client, request.query, 3072)
+    embedded_queries = await embed_openai(openai_client, request.query, DIMENSIONS[ENV["EMBEDDING_MODEL"]])
     embedded_query: list[float] = embedded_queries[0]  # Only embedded 1 query
 
     # Query Pinecone
@@ -59,15 +59,27 @@ async def query(request: QueryRequest) -> QueryResponse:
             metadata=PineconeMetadata(
                 chunk_id=result.metadata["chunk_id"],
                 name=result.metadata["name"],
+                fund_name=result.metadata["fund_name"],
                 timestamp=int(result.metadata["timestamp"]),
                 text=result.metadata["text"],
                 page=int(result.metadata["page"]),
+                region=result.metadata["region"],
+                date=result.metadata["date"],
             ),
         )
         for result in query_results
     ]
+    logger.info(f"Retreived {len(matches)} matches from vector store.")
     # Reranking
     ranked_results: list[PineconeResults] = await rerank(get_cohere_client(), request.query, matches)
+    relavent_context: list[dict[str, str | int]] = [
+        {
+            "text": res.metadata.text,
+            "page_nunber": res.metadata.page,
+            "file_name": res.metadata.name,
+        }
+        for res in ranked_results
+    ]
 
     # Construct prompt
     system_prompt_path = Path(__file__).parent.parent / "prompts" / "system.json"
@@ -77,9 +89,9 @@ async def query(request: QueryRequest) -> QueryResponse:
         system_content: str = json.load(file)["content"]
         system_prompt = ChatCompletionSystemMessageParam(role="system", content=system_content)
     with open(user_prompt_path, "r") as file:
-        user_content: str = json.load(file)["content"].format(question=request.query, context=ranked_results)
+        user_content: str = json.load(file)["content"].format(question=request.query, context=relavent_context)
         user_prompt = ChatCompletionUserMessageParam(role="user", content=user_content)
-        logger.debug(f"Prompt created -\nSystem: {system_prompt}\nUser: {user_prompt}")
+    logger.debug(f"Prompt created -\nSystem: {system_prompt}\nUser: {user_prompt}")
 
     # Pass prompt to LLM
     try:
@@ -93,5 +105,5 @@ async def query(request: QueryRequest) -> QueryResponse:
         raise HTTPException(status_code=401, detail=f"Unauthorized key for OpenAI API.")
 
     logger.debug(f"LLM answer:\n{stream}")
-    logger.debug(f"Context used:\n{ranked_results}")
+    logger.debug(f"Relavent context:\n{relavent_context}")
     return QueryResponse(answer=answer, context=ranked_results)

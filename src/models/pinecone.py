@@ -1,13 +1,11 @@
 from dataclasses import dataclass
 
+from src.models.base import FundMetadata
+
 
 @dataclass
-class PineconeMetadata:
-    """
-    Named dictionary used to store metadata for Pinecone entries
-    """
-
-    chunk_id: str
+class PineconeMetadata(FundMetadata):
+    chunk_id: int
     name: str
     timestamp: int
     text: str
