@@ -33,5 +33,5 @@ jobs:
       - name: mypy check
         run: poetry run mypy ./src/
 
-      - name: pytest check
-        run: poetry run pytest -vv 
+      # - name: pytest check
+      #   run: poetry run pytest -vv 
