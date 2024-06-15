@@ -9,7 +9,7 @@ from pathlib import Path
 from src import ENV
 from src.utils.logger import get_logger
 from src.utils.clients import get_cohere_client
-from src.models.pinecone import PineconeResults
+from src.models.pinecone import PineconeRecord
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 logger = get_logger(ETC_PATH / "logs")
@@ -51,27 +51,29 @@ async def statistically_chunk_content(
 
 
 async def rerank(
-    client: CohereClient, query: str, results: list[PineconeResults], top_n: int = int(ENV["TOP_RERANK"])
-) -> list[PineconeResults]:
+    client: CohereClient, query: str, records: list[PineconeRecord], top_n: int = int(ENV["TOP_RERANK"])
+) -> list[PineconeRecord]:
     """
-    Reranks the results from a vector store based on semantic relavance with respect to the given query.
+    Reranks the records from a vector store based on semantic relavance with respect to the given query.
 
     Args:
         client: Cohere client used to rerank.
         query (str): User question we are looking to answer.
-        results (list[PineconeResults]): The results queried from the vector store along with the metadata.
+        records (list[PineconeRecord]): The records queried from the vector store along with the metadata.
         top_n (int): Top n chunks to return after reranking. Loaded from .env file.
 
     Returns:
-        list[PineconeResults]: The top n reranked results.
+        list[PineconeRecord]: The top n reranked results.
     """
     client = get_cohere_client()
-    reranked_results: list[RerankResponseResultsItem] = client.rerank(
+    documents: list[str] = [str(record.metadata) for record in records]
+    logger.debug(f"Documents to rerank: {documents}")
+    ranked_records: list[RerankResponseResultsItem] = client.rerank(
         query=query,
-        documents=[result.metadata.text for result in results],
+        documents=documents,
         model="rerank-english-v3.0",
         top_n=top_n,
         return_documents=False,
     ).results
-    logger.info(f"Reranked chunks -> {[res.index for res in reranked_results]}")
-    return [results[res.index] for res in reranked_results]
+    logger.info(f"Reranked chunks -> {[record.index for record in ranked_records]}")
+    return [records[record.index] for record in ranked_records]

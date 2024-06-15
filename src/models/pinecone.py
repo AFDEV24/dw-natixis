@@ -6,10 +6,10 @@ from src.models.base import FundMetadata
 @dataclass
 class PineconeMetadata(FundMetadata):
     chunk_id: int
-    name: str
+    file_name: str
     timestamp: int
-    text: str
     page: int
+    text: str
 
     def __str__(self) -> str:
         """
@@ -18,7 +18,7 @@ class PineconeMetadata(FundMetadata):
         Returns:
             str: A formatted string containing all the fields of PineconeMetadata.
         """
-        return "\n".join(f"{key}: {value}" for key, value in asdict(self).items())
+        return "Metadata:\n" + self.to_string_except_text() + "\nContext:\n" + self.text
 
     def to_string_except_text(self) -> str:
         """

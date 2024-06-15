@@ -88,7 +88,7 @@ def _create_records(
                     fund_name=request.fund_name,
                     date=request.date,
                     chunk_id=chunk_number,
-                    name=file_name,
+                    file_name=file_name,
                     timestamp=timestamp,
                     text=text,
                     page=page_num,

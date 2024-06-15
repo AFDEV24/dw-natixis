@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from src.models.pinecone import PineconeResults
+from src.models.pinecone import PineconeRecord
 
 
 class UploadResponse(BaseModel):
@@ -14,4 +14,4 @@ class CreateEmbeddingsResponse(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
-    context: list[PineconeResults]
+    context: list[PineconeRecord]

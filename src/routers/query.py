@@ -5,10 +5,11 @@ from openai import AuthenticationError
 from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
 from pinecone.exceptions import UnauthorizedException
+from typing import Any
 
 from src.models.requests import QueryRequest
 from src.models.response import QueryResponse
-from src.models.pinecone import PineconeResults, PineconeMetadata
+from src.models.pinecone import PineconeRecord, PineconeMetadata
 
 from src.utils.embeddings import embed_openai
 from src.utils.clients import get_pinecone_index, get_openai_client, get_cohere_client
@@ -17,26 +18,21 @@ from src.utils.parsers import rerank
 from src import ENV, DIMENSIONS
 
 router = APIRouter()
-logger = get_logger(file_path=Path(__file__).parent.parent.parent / "etc" / "logs")
+ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
+logger = get_logger(file_path=ETC_PATH / "logs")
 
 
 @router.post("/query")
 async def query(request: QueryRequest) -> QueryResponse:
     """
-    Handles a query request, invokes a retrieval-augmented generation (RAG) chain to provide an answer.
+    Embeds the user query, search Pinecone for relevant records, reranks the records and generate a response
+    using OpenAI.
 
     Args:
-        request (QueryRequest): The query request containing the client, project, file name, and query string.
+        request (QueryRequest): The request object containing the query, client, and project information.
 
     Returns:
-        QueryResponse: The response containing the answer and the context used to generate the answer.
-
-    This function performs the following steps:
-    1. Retrieves the Pinecone index which serves as a connection using the provided client information.
-    2. Creates a RAG chain using the retrieved index, project name, file name, and a prompt file.
-    3. Invokes the chain with the query provided in the request.
-    4. Extracts the answer and context from the response.
-    5. Returns a QueryResponse object with the answer and context.
+        QueryResponse: The response containing the generated answer and context from the matched records.
     """
     openai_client = get_openai_client()
     # Embed question
@@ -44,7 +40,7 @@ async def query(request: QueryRequest) -> QueryResponse:
     embedded_query: list[float] = embedded_queries[0]  # Only embedded 1 query
 
     # Query Pinecone
-    index = await get_pinecone_index(client=request.client)
+    index = await get_pinecone_index(request.client)
     query_results = index.query(
         namespace=request.project,
         vector=embedded_query,
@@ -53,57 +49,75 @@ async def query(request: QueryRequest) -> QueryResponse:
         include_metadata=True,
     ).matches
     matches = [
-        PineconeResults(
+        PineconeRecord(
             id=result.id,
             score=float(result.score),
-            metadata=PineconeMetadata(
-                chunk_id=result.metadata["chunk_id"],
-                name=result.metadata["name"],
-                fund_name=result.metadata["fund_name"],
-                timestamp=int(result.metadata["timestamp"]),
-                text=result.metadata["text"],
-                page=int(result.metadata["page"]),
-                region=result.metadata["region"],
-                date=result.metadata["date"],
-            ),
+            metadata=PineconeMetadata(**_process_metadata(result.metadata)),
         )
         for result in query_results
     ]
     logger.info(f"Retreived {len(matches)} matches from vector store.")
-    # Reranking
-    ranked_results: list[PineconeResults] = await rerank(get_cohere_client(), request.query, matches)
-    relavent_context: list[dict[str, str | int]] = [
-        {
-            "text": res.metadata.text,
-            "page_nunber": res.metadata.page,
-            "file_name": res.metadata.name,
-        }
-        for res in ranked_results
-    ]
-
-    # Construct prompt
-    system_prompt_path = Path(__file__).parent.parent / "prompts" / "system.json"
-    user_prompt_path = Path(__file__).parent.parent / "prompts" / "user.json"
-
-    with open(system_prompt_path, "r") as file:
-        system_content: str = json.load(file)["content"]
-        system_prompt = ChatCompletionSystemMessageParam(role="system", content=system_content)
-    with open(user_prompt_path, "r") as file:
-        user_content: str = json.load(file)["content"].format(question=request.query, context=relavent_context)
-        user_prompt = ChatCompletionUserMessageParam(role="user", content=user_content)
-    logger.debug(f"Prompt created -\nSystem: {system_prompt}\nUser: {user_prompt}")
+    ranked_records: list[PineconeRecord] = await rerank(get_cohere_client(), request.query, matches)
 
     # Pass prompt to LLM
     try:
         stream = openai_client.chat.completions.create(
-            model=ENV["CHAT_MODEL"], messages=[system_prompt, user_prompt], temperature=float(ENV["TEMPERATURE"])
-        )  # type:ignore
-        answer = stream.choices[0].message.content if stream.choices[0].message.content else "I don't know."
+            model=ENV["CHAT_MODEL"],
+            messages=_construct_prompt(request, ranked_records),
+            temperature=float(ENV["TEMPERATURE"]),
+        )
+        answer = stream.choices[0].message.content if stream.choices[0].message.content else "I don't know."  # Temp
     except UnauthorizedException:
         raise HTTPException(status_code=401, detail=f"Unauthorized key for Pinecone index for client {request.client}.")
     except AuthenticationError:
         raise HTTPException(status_code=401, detail=f"Unauthorized key for OpenAI API.")
 
-    logger.debug(f"LLM answer:\n{stream}")
-    logger.debug(f"Relavent context:\n{relavent_context}")
-    return QueryResponse(answer=answer, context=ranked_results)
+    logger.info(f"LLM answer:\n{stream}")
+    logger.debug(f"Context used:\n {[str(record.metadata) for record in ranked_records]}")
+    return QueryResponse(answer=answer, context=ranked_records)
+
+
+def _process_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """
+    Process the metadata dictionary to ensure certain fields are of correctly typed.
+
+    Args:
+        metadata (Dict): The metadata dictionary.
+
+    Returns:
+        Dict: The processed metadata dictionary with correct field types.
+    """
+    # Ensure specific fields are integers
+    metadata["page"] = int(metadata["page"])
+    metadata["chunk_id"] = int(metadata["chunk_id"])
+    metadata["timestamp"] = int(metadata["timestamp"])
+    return metadata
+
+
+def _construct_prompt(
+    request: QueryRequest, records: list[PineconeRecord]
+) -> list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]:
+    """
+    Constructs a prompt for the chat completion model based on the query request and ranked records.
+
+    Args:
+        request (QueryRequest): The request object containing the query and other relevant information.
+        records (list[PineconeRecord]): A list of PineconeRecord instances to be used as context for the prompt.
+
+    Returns:
+        list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]: A list containing the system and user prompts for the chat completion model.
+    """
+    prompt_path = Path(__file__).parent.parent / "prompts"
+    system_prompt_path = prompt_path / "system.json"
+    user_prompt_path = prompt_path / "user.json"
+
+    with open(system_prompt_path, "r") as file:
+        system_content: str = json.load(file)["content"]
+        system_prompt = ChatCompletionSystemMessageParam(role="system", content=system_content)
+    with open(user_prompt_path, "r") as file:
+        user_content: str = json.load(file)["content"].format(
+            question=request.query, context=[str(record.metadata) for record in records]
+        )
+        user_prompt = ChatCompletionUserMessageParam(role="user", content=user_content)
+    logger.debug(f"Prompt created -\nSystem: {system_prompt}\nUser: {user_prompt}")
+    return [system_prompt, user_prompt]
