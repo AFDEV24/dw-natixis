@@ -18,7 +18,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n    \"client\": \"mass-prim\",\n    \"project\": \"demo\"\n}",
+					"raw": "{\n    \"client\": \"natixis\",\n    \"project\": \"test\",\n    \"region\": \"northeast\",\n    \"fund_name\": \"colorado-pension\",\n    \"date\": \"2019-12-01\"\n}",
 					"options": {
 						"raw": {
 							"language": "json"
@@ -56,7 +56,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n    \"client\": \"colorado-pension\",\n    \"project\": \"test-chunker\",\n    \"query\": \"what are the funds views on esg?\"\n    // \"file_name\": \"2.ColoradoFP_BOTmins_072519.pdf\"\n}",
+					"raw": "{\n    \"client\": \"denis-test\",\n    \"project\": \"test\",\n    \"query\": \"what are the funds views on esg\"\n}",
 					"options": {
 						"raw": {
 							"language": "json"
