@@ -1,11 +1,9 @@
 from pypdf import PdfReader
 from pathlib import Path
 from cohere import RerankResponseResultsItem, Client as CohereClient
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from semantic_router.encoders import OpenAIEncoder
 from semantic_chunkers import StatisticalChunker
 from semantic_chunkers.schema import Chunk
-from langchain_core.documents import Document
 from pathlib import Path
 
 from src import ENV
@@ -25,56 +23,11 @@ def parse_pdf(file: Path) -> list[str]:
     return [page.extract_text() for page in reader.pages]
 
 
-def recursively_chunk_content(
-    content: Document,
-    chunk_size: int = int(ENV["CHUNK_SIZE"]),
-    chunk_overlap: int = int(ENV["CHUNK_OVERLAP"]),
-) -> list[Document]:
-    """
-    Splits the content of a given document into smaller chunks based on specified separators and encoding.
-    The separators used for splitting include newlines, spaces, punctuation marks, and other special characters.
-    Chunk size and overlap are set as env vars.
-
-    Args:
-        content (Document): The input document to be split into chunks.
-        encoding_name (str): Encoding used for tokenizing. Defaults to cl100k_base as it's used for 3rd gen OpenAI embedding models.
-
-    Returns:
-        list[Document]: A list of chunked documents, each representing a portion of the original document content.
-    """
-    # encoding = tiktoken.encoding_for_model(ENV["CHAT_MODEL"]).name
-    encoding = "cl100k_base"
-    text_splitter = RecursiveCharacterTextSplitter().from_tiktoken_encoder(
-        encoding_name=encoding,
-        separators=[
-            "\n\n",
-            "\n",
-            ".",
-            ",",
-            " ",
-            "\u200b",  # Zero-width space
-            "\uff0c",  # Fullwidth comma
-            "\u3001",  # Ideographic comma
-            "\uff0e",  # Fullwidth full stop
-            "\u3002",  # Ideographic full stop
-            "",
-        ],
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
-    logger.debug(
-        f"Chunking using encoding '{encoding}' with separators: {text_splitter._separators}, chunk_size: {text_splitter._chunk_size}, chunk_overlap: {text_splitter._chunk_overlap}"
-    )
-
-    documents = text_splitter.split_documents([content])
-    return documents
-
-
 async def statistically_chunk_content(
     contents: list[str], encoding_name: str = ENV["EMBEDDING_MODEL"]
 ) -> list[tuple[int, str]]:
     """
-    Statistically splits the content of a given document into smaller chunks.
+    Statistically splits document into smaller chunks to optimize for semantic meaning of each chunk.
 
     Args:
         content (list[str]): List of strings representing contents of each page.
