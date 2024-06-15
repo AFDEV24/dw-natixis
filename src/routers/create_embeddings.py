@@ -6,17 +6,16 @@ from pathlib import Path
 from fastapi import APIRouter
 from pinecone import Index, Vector
 
+from src import DIMENSIONS, ENV
+from src.models.pinecone import PineconeMetadata, PineconeRecord
 from src.models.requests import CreateEmbeddingsRequest
 from src.models.response import CreateEmbeddingsResponse
-from src.models.pinecone import PineconeMetadata, PineconeRecord
-from src.utils.embeddings import embed_openai
-from src.utils.clients import get_pinecone_index, get_openai_client, OpenAIClient
+from src.utils.clients import OpenAIClient, get_openai_client, get_pinecone_index
 from src.utils.decorators import async_retry
+from src.utils.embeddings import embed_openai
 from src.utils.hashers import hash_string
 from src.utils.logger import get_logger
 from src.utils.parsers import parse_pdf, statistically_chunk_content
-
-from src import ENV, DIMENSIONS
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 router = APIRouter()

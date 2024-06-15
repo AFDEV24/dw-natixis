@@ -1,21 +1,21 @@
 import json
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
-from openai import AuthenticationError
-from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
-from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
-from pinecone.exceptions import UnauthorizedException
 from typing import Any
 
+from fastapi import APIRouter, HTTPException
+from openai import AuthenticationError
+from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
+from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
+from pinecone.exceptions import UnauthorizedException
+
+from src import DIMENSIONS, ENV
+from src.models.pinecone import PineconeMetadata, PineconeRecord
 from src.models.requests import QueryRequest
 from src.models.response import QueryResponse
-from src.models.pinecone import PineconeRecord, PineconeMetadata
-
+from src.utils.clients import get_cohere_client, get_openai_client, get_pinecone_index
 from src.utils.embeddings import embed_openai
-from src.utils.clients import get_pinecone_index, get_openai_client, get_cohere_client
 from src.utils.logger import get_logger
 from src.utils.parsers import rerank
-from src import ENV, DIMENSIONS
 
 router = APIRouter()
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
@@ -70,7 +70,7 @@ async def query(request: QueryRequest) -> QueryResponse:
     except UnauthorizedException:
         raise HTTPException(status_code=401, detail=f"Unauthorized key for Pinecone index for client {request.client}.")
     except AuthenticationError:
-        raise HTTPException(status_code=401, detail=f"Unauthorized key for OpenAI API.")
+        raise HTTPException(status_code=401, detail="Unauthorized key for OpenAI API.")
 
     logger.info(f"LLM answer:\n{stream}")
     logger.debug(f"Context used:\n {[str(record.metadata) for record in ranked_records]}")

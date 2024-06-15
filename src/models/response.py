@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+
 from src.models.pinecone import PineconeRecord
 
 

@@ -1,7 +1,8 @@
 from functools import lru_cache
+
 from async_lru import alru_cache
-from openai import Client as OpenAIClient
 from cohere import Client as CohereClient
+from openai import Client as OpenAIClient
 from pinecone import Index, Pinecone
 
 from src import ENV

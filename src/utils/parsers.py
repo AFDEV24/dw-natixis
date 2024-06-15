@@ -1,15 +1,16 @@
-from pypdf import PdfReader
-from pathlib import Path
-from cohere import RerankResponseResultsItem, Client as CohereClient
-from semantic_router.encoders import OpenAIEncoder
-from semantic_chunkers import StatisticalChunker
-from semantic_chunkers.schema import Chunk
 from pathlib import Path
 
+from cohere import Client as CohereClient
+from cohere import RerankResponseResultsItem
+from pypdf import PdfReader
+from semantic_chunkers import StatisticalChunker
+from semantic_chunkers.schema import Chunk
+from semantic_router.encoders import OpenAIEncoder
+
 from src import ENV
-from src.utils.logger import get_logger
-from src.utils.clients import get_cohere_client
 from src.models.pinecone import PineconeRecord
+from src.utils.clients import get_cohere_client
+from src.utils.logger import get_logger
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 logger = get_logger(ETC_PATH / "logs")
