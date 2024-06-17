@@ -9,7 +9,7 @@ class UploadResponse(BaseModel):
 
 
 class CreateEmbeddingsResponse(BaseModel):
-    ids: dict[str, tuple[list[str], int]]
+    ids: dict[str, tuple[int, int]]
     details: str
 
 

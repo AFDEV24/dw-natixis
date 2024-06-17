@@ -1,4 +1,5 @@
 import time
+import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,32 +38,54 @@ async def create_embeddings(request: CreateEmbeddingsRequest) -> CreateEmbedding
     pc_index = await get_pinecone_index(request.client)
 
     # TODO: REMOVE HARD CODED PATH FOR FILES WHEN FILE FETCHING IS IMPLEMENTED
-    samples_path = ETC_PATH / "sample_files" / "colorado_pension"
+    samples_path = ETC_PATH / "sample_files" / request.fund_name
     files = [p for p in samples_path.iterdir() if p.is_file()]
-    file_ids: dict[str, tuple[list[str], int]] = {}
+    response_files: dict[str, tuple[int, int]] = {}
     for file in files:
         # Epoch time - microseconds to minimize race condition when two files with same name are downloaded at the same time
         timestamp: int = int(datetime.now(timezone.utc).timestamp() * 10**6)
         file_name: str = file.stem
-        parsed_pdf: list[str] = parse_pdf(file)
+        try:
+            parsed_pdf: list[str] = parse_pdf(file)
+        except Exception as e:
+            logger.error(f"Error occurred when parsing pdf '{file_name}':\n{e}")
 
         chunks: list[tuple[int, str]] = await statistically_chunk_content(parsed_pdf)
         logger.info(f"Split content into {len(chunks)} chunks.")
 
-        records = _create_records(request, chunks, file_name, timestamp)
-        vectors = await _create_vectors(openai_client, records)
-        await _upload_to_pinecone(pc_index, vectors, request.project)
+        records = _create_records(request, chunks, file_name, timestamp, _extract_date_from_title(file_name))
+        merged_vectors = await _merge_with_metadata(openai_client, records)
+        await _upload_to_pinecone(pc_index, merged_vectors, request.project)
 
-        file_ids[file_name] = ([record.id for record in records], timestamp)
+        response_files[file_name] = (len(records), timestamp)
 
     return CreateEmbeddingsResponse(
-        ids=file_ids,
-        details=f"Sucessfully added documents to vector store under index '{request.client}' with namespace '{request.project}'",
+        ids=response_files,
+        details=f"Sucessfully added {len(records)} chunks to index '{request.client}' with namespace '{request.project}'",
     )
 
 
+def _extract_date_from_title(file_name: str) -> str:
+    """
+    Extracts a date from a filename and formats it as YY-MM-DD.
+    The date is expected to be in the format MM-DD-YY.
+
+    Args:
+        filename (str): The filename to extract the date from.
+
+    Returns:
+        (str): The extracted and formatted date in YY-MM-DD format, or empty string if no date is found.
+    """
+    match = re.search(r"\b\d{1,2}-\d{1,2}-\d{2}\b", file_name)
+    if match:
+        date_str = match.group(0)
+        date_obj = datetime.strptime(date_str, "%m-%d-%y")
+        return date_obj.strftime("%y-%m-%d")
+    return ""
+
+
 def _create_records(
-    request: CreateEmbeddingsRequest, chunks: list[tuple[int, str]], file_name: str, timestamp: int
+    request: CreateEmbeddingsRequest, chunks: list[tuple[int, str]], file_name: str, timestamp: int, date: str
 ) -> list[PineconeRecord]:
     """
     Create PineconeRecord instances for each text chunk of the file.
@@ -81,11 +104,11 @@ def _create_records(
         page_num, text = chunk
         records.append(
             PineconeRecord(
-                id=hash_string(f"{request.date}{request.fund_name}{file_name}{page_num}{chunk_number}"),
+                id=hash_string(f"{date}{request.fund_name}{file_name}{page_num}{chunk_number}"),
                 metadata=PineconeMetadata(
                     region=request.region,
                     fund_name=request.fund_name,
-                    date=request.date,
+                    date=date,
                     chunk_id=chunk_number,
                     file_name=file_name,
                     timestamp=timestamp,
@@ -98,7 +121,7 @@ def _create_records(
 
 
 @async_retry(logger=logger, max_attempts=2, initial_delay=1, backoff_base=2)
-async def _create_vectors(openai_client: OpenAIClient, records: list[PineconeRecord]) -> list[Vector]:
+async def _merge_with_metadata(openai_client: OpenAIClient, records: list[PineconeRecord]) -> list[Vector]:
     """
     Create vector space for each record by embedding their content and metadata using OpenAI embedding model
     then concatenate the text vectors for a PineconeRecord with its respective metadata vectors.
