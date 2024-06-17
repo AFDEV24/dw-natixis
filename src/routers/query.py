@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +117,9 @@ def _construct_prompt(
         system_prompt = ChatCompletionSystemMessageParam(role="system", content=system_content)
     with open(user_prompt_path, "r") as file:
         user_content: str = json.load(file)["content"].format(
-            question=request.query, context=[str(record.metadata) for record in records]
+            question=request.query,
+            context=[str(record.metadata) for record in records],
+            today=datetime.today().strftime("%Y-%m-%d"),
         )
         user_prompt = ChatCompletionUserMessageParam(role="user", content=user_content)
     logger.debug(f"Prompt created -\nSystem: {system_prompt}\nUser: {user_prompt}")

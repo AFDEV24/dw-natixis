@@ -1,4 +1,4 @@
 {
     "role": "user",
-    "content": "Question: {question}\n\nContext: {context}"
+    "content": "Question: {question}\n\nContext: {context}\n\nToday's date: {today}"
 }
