@@ -35,8 +35,8 @@ async def statistically_chunk_content(
         encoding_name (str): Encoding used for tokenizing.
 
     Returns:
-        List containing tuple pairs, first element of pair is the page number where the chunk is from, the second
-        element is the chunk.
+        List containing tuple pairs, first element of pair is the page number (index starting at 1)
+        where the chunk is from, the second element is the text chunk.
     """
     encoder = OpenAIEncoder(name=encoding_name, openai_api_key=ENV["OPENAI_API_KEY"])
     chunker = StatisticalChunker(
@@ -47,7 +47,9 @@ async def statistically_chunk_content(
     )
     chunked_contents: list[list[Chunk]] = chunker(docs=contents)
     return [
-        (int(page_num), chunk.content) for page_num, page_chunks in enumerate(chunked_contents) for chunk in page_chunks
+        (int(page_num) + 1, chunk.content)
+        for page_num, page_chunks in enumerate(chunked_contents)
+        for chunk in page_chunks
     ]
 
 
