@@ -10,6 +10,7 @@ from openai.types.chat.chat_completion_user_message_param import ChatCompletionU
 from pinecone.exceptions import UnauthorizedException
 
 from src import DIMENSIONS, ENV
+from src.models.chat_history import ChatHistory
 from src.models.pinecone import PineconeMetadata, PineconeRecord
 from src.models.requests import QueryRequest
 from src.models.response import QueryResponse
@@ -21,6 +22,8 @@ from src.utils.parsers import rerank
 router = APIRouter()
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 logger = get_logger(file_path=ETC_PATH / "logs")
+
+chat_history = ChatHistory()
 
 
 @router.post("/query")
@@ -36,8 +39,15 @@ async def query(request: QueryRequest) -> QueryResponse:
         QueryResponse: The response containing the generated answer and context from the matched records.
     """
     openai_client = get_openai_client()
+
+    user_query: str = request.query
+    # Use chat history to reformulate question
+    if chat_history.get(request.chat_id):
+        user_query = chat_history.reformulate_query(openai_client, request.chat_id, request.query)
+        logger.info(f"Reformulated user query from {request.query} -> {user_query}")
+
     # Embed question
-    embedded_queries = await embed_openai(openai_client, request.query, DIMENSIONS[ENV["EMBEDDING_MODEL"]])
+    embedded_queries = await embed_openai(openai_client, user_query, DIMENSIONS[ENV["EMBEDDING_MODEL"]])
     embedded_query: list[float] = embedded_queries[0]  # Only embedded 1 query
 
     # Query Pinecone
@@ -58,7 +68,7 @@ async def query(request: QueryRequest) -> QueryResponse:
         for result in query_results
     ]
     logger.info(f"Retreived {len(matches)} matches from vector store.")
-    ranked_records: list[PineconeRecord] = await rerank(get_cohere_client(), request.query, matches)
+    ranked_records: list[PineconeRecord] = await rerank(get_cohere_client(), user_query, matches)
 
     # Pass prompt to LLM
     try:
@@ -75,6 +85,7 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     logger.info(f"LLM answer:\n{stream}")
     logger.debug(f"Context used:\n {[str(record.metadata) for record in ranked_records]}")
+    print("\n", answer)
     return QueryResponse(answer=answer, context=ranked_records)
 
 
@@ -92,6 +103,10 @@ def _process_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     metadata["page"] = int(metadata["page"])
     metadata["chunk_id"] = int(metadata["chunk_id"])
     metadata["timestamp"] = int(metadata["timestamp"])
+
+    # Hack: rename date metadata field
+    metadata["file_creation_date"] = metadata["date"]
+    metadata.pop("date")
     return metadata
 
 

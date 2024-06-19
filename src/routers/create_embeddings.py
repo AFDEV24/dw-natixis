@@ -108,7 +108,7 @@ def _create_records(
                 metadata=PineconeMetadata(
                     region=request.region,
                     fund_name=request.fund_name,
-                    date=date,
+                    file_creation_date=date,
                     chunk_id=chunk_number,
                     file_name=file_name,
                     timestamp=timestamp,

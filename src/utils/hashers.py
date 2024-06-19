@@ -12,8 +12,8 @@ def hash_string(s: str) -> str:
         str: The hexadecimal representation of the SHA-256 hash of the input string.
 
     Example:
-        >>> hash_string("建築基準法施行令")
-        '2f8f30b6b4fb29278d80255601dcf6d8a65a7dd5e8a6dfd3c1b3e8f9a206e1c5'
+        >>> hash_string("helloworld")
+        '936a185caaa266bb9cbe981e9e05cb78cd732b0b3280eb944412bb6f8f8f07af'
     """
     sha256_hash = hashlib.sha256()
     sha256_hash.update(s.encode("utf-8"))

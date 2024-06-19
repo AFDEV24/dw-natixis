@@ -10,7 +10,7 @@ class PineconeMetadata(FundMetadata):
     timestamp: int
     page: int
     text: str
-    date: str
+    file_creation_date: str
 
     def __str__(self) -> str:
         """
