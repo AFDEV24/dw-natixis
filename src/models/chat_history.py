@@ -7,7 +7,11 @@ from openai.types.chat.chat_completion_system_message_param import ChatCompletio
 from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
 
 from src import ENV
-from src.utils.clients import OpenAIClient
+from src.utils.logger import get_logger
+from src.utils.connections import OpenAIClient
+
+ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
+logger = get_logger(ETC_PATH / "logs")
 
 
 @dataclass
@@ -25,17 +29,17 @@ class ChatHistory:
         return list(self.recorded_histories.get(chat_id, []))
 
     def put(self, chat_id: str, chat_exchange: ChatExchange) -> None:
-        history = self.recorded_histories[chat_id]
-        history.append(chat_exchange)
+        exchanges = self.recorded_histories.get(chat_id, deque())
+        exchanges.append(chat_exchange)
 
-        if len(history) > self.max_capacity:
-            history.popleft()
-            self.recorded_histories[chat_id] = history
+        if len(exchanges) > self.max_capacity:
+            exchanges.popleft()
+        self.recorded_histories[chat_id] = exchanges
 
     def exchanges_to_string(self, chat_id: str) -> str:
-        history = self.recorded_histories[chat_id]
-        return "\n\n".join(
-            [f"User question: {exchange.question}\nAssistant answer: {exchange.answer}" for exchange in history]
+        exchanges = self.recorded_histories[chat_id]
+        return "\n------\n".join(
+            [f"User question: {exchange.question}\nAssistant answer: {exchange.answer}" for exchange in exchanges]
         )
 
     def reformulate_query(self, openai_client: OpenAIClient, chat_id: str, query: str) -> str:
@@ -43,24 +47,14 @@ class ChatHistory:
         answer = openai_client.chat.completions.create(
             model=ENV["REFORMULATION_MODEL"],
             messages=self._construct_prompt(exchanges, query),
-            temperature=0,
+            temperature=0.2,
         )
         return answer.choices[0].message.content if answer.choices[0].message.content else ""
 
     def _construct_prompt(
         self, exchanges: str, query: str
     ) -> list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]:
-        """
-        Constructs a prompt for the chat completion model based on the query request and ranked records.
-
-        Args:
-            request (QueryRequest): The request object containing the query and other relevant information.
-            records (list[PineconeRecord]): A list of PineconeRecord instances to be used as context for the prompt.
-
-        Returns:
-            list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]: A list containing the system and user prompts for the chat completion model.
-        """
-        prompt_path = Path(__file__).parent.parent / "chat_history" / "prompts"
+        prompt_path = Path(__file__).parent.parent / "prompts" / "chat_history"
         system_prompt_path = prompt_path / "system.json"
         user_prompt_path = prompt_path / "user.json"
 
@@ -70,7 +64,8 @@ class ChatHistory:
         with open(user_prompt_path, "r") as file:
             user_content: str = json.load(file)["content"].format(
                 question=query,
-                history=exchanges,
+                exchanges=exchanges,
             )
             user_prompt = ChatCompletionUserMessageParam(role="user", content=user_content)
+        logger.debug(f"Prompt created for question reformuation -\nSystem: {system_prompt}\nUser: {user_prompt}")
         return [system_prompt, user_prompt]

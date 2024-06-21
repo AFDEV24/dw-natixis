@@ -11,7 +11,7 @@ from src import DIMENSIONS, ENV
 from src.models.pinecone import PineconeMetadata, PineconeRecord
 from src.models.requests import CreateEmbeddingsRequest
 from src.models.response import CreateEmbeddingsResponse
-from src.utils.clients import OpenAIClient, get_openai_client, get_pinecone_index
+from src.utils.connections import OpenAIClient, get_openai_client, get_pinecone_index
 from src.utils.decorators import async_retry
 from src.utils.embeddings import embed_openai
 from src.utils.hashers import hash_string

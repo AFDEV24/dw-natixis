@@ -9,8 +9,9 @@ from semantic_router.encoders import OpenAIEncoder
 
 from src import ENV
 from src.models.pinecone import PineconeRecord
-from src.utils.clients import get_cohere_client
+from src.utils.connections import get_cohere_client
 from src.utils.logger import get_logger
+from src.utils.decorators import async_retry
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 logger = get_logger(ETC_PATH / "logs")
@@ -53,6 +54,7 @@ async def statistically_chunk_content(
     ]
 
 
+@async_retry(logger, max_attempts=2, initial_delay=1, backoff_base=2)
 async def rerank(
     client: CohereClient, query: str, records: list[PineconeRecord], top_n: int = int(ENV["TOP_RERANK"])
 ) -> list[PineconeRecord]:
@@ -69,8 +71,10 @@ async def rerank(
         list[PineconeRecord]: The top n reranked results.
     """
     client = get_cohere_client()
-    documents: list[str] = [str(record.metadata) for record in records]
-    logger.debug(f"Documents to rerank: {documents}")
+    documents: list[str] = [str(record.metadata) for record in records]  # record metadata includes chunk text
+    if ENV["DEBUG"] == "TRUE":
+        for idx, doc in enumerate(documents):
+            logger.debug(f"Chunk {idx} to rerank: {doc}\n----------------\n")
     ranked_records: list[RerankResponseResultsItem] = client.rerank(
         query=query,
         documents=documents,

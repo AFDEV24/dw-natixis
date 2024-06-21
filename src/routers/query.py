@@ -10,11 +10,11 @@ from openai.types.chat.chat_completion_user_message_param import ChatCompletionU
 from pinecone.exceptions import UnauthorizedException
 
 from src import DIMENSIONS, ENV
-from src.models.chat_history import ChatHistory
+from src.models.chat_history import ChatHistory, ChatExchange
 from src.models.pinecone import PineconeMetadata, PineconeRecord
 from src.models.requests import QueryRequest
 from src.models.response import QueryResponse
-from src.utils.clients import get_cohere_client, get_openai_client, get_pinecone_index
+from src.utils.connections import get_cohere_client, get_openai_client, get_pinecone_index
 from src.utils.embeddings import embed_openai
 from src.utils.logger import get_logger
 from src.utils.parsers import rerank
@@ -22,6 +22,7 @@ from src.utils.parsers import rerank
 router = APIRouter()
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 logger = get_logger(file_path=ETC_PATH / "logs")
+
 
 chat_history = ChatHistory()
 
@@ -42,9 +43,13 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     user_query: str = request.query
     # Use chat history to reformulate question
-    if chat_history.get(request.chat_id):
+    exchanges = chat_history.get(request.chat_id)
+    if exchanges:
         user_query = chat_history.reformulate_query(openai_client, request.chat_id, request.query)
         logger.info(f"Reformulated user query from {request.query} -> {user_query}")
+        logger.debug(
+            f"Chat history of length {len(exchanges)} used:\n{chat_history.exchanges_to_string(request.chat_id)}"
+        )
 
     # Embed question
     embedded_queries = await embed_openai(openai_client, user_query, DIMENSIONS[ENV["EMBEDDING_MODEL"]])
@@ -78,14 +83,13 @@ async def query(request: QueryRequest) -> QueryResponse:
             temperature=float(ENV["TEMPERATURE"]),
         )
         answer = stream.choices[0].message.content if stream.choices[0].message.content else "I don't know."  # Temp
+        chat_history.put(request.chat_id, chat_exchange=ChatExchange(question=request.query, answer=answer))
     except UnauthorizedException:
         raise HTTPException(status_code=401, detail=f"Unauthorized key for Pinecone index for client {request.client}.")
     except AuthenticationError:
         raise HTTPException(status_code=401, detail="Unauthorized key for OpenAI API.")
 
-    logger.info(f"LLM answer:\n{stream}")
-    logger.debug(f"Context used:\n {[str(record.metadata) for record in ranked_records]}")
-    print("\n", answer)
+    logger.info(f"LLM answer:\n\n{answer}")
     return QueryResponse(answer=answer, context=ranked_records)
 
 
@@ -121,9 +125,10 @@ def _construct_prompt(
         records (list[PineconeRecord]): A list of PineconeRecord instances to be used as context for the prompt.
 
     Returns:
-        list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]: A list containing the system and user prompts for the chat completion model.
+        list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]:
+        A list containing the system and user prompts for the chat completion model.
     """
-    prompt_path = Path(__file__).parent.parent / "prompts"
+    prompt_path = Path(__file__).parent.parent / "prompts" / "query"
     system_prompt_path = prompt_path / "system.json"
     user_prompt_path = prompt_path / "user.json"
 

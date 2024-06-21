@@ -1,4 +1,0 @@
-{
-    "role": "user",
-    "content": "Latest question: {question}\n\nChat history: {history}"
-}
