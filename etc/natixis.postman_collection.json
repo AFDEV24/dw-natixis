@@ -1,0 +1,83 @@
+{
+	"info": {
+		"_postman_id": "d5251dd6-28af-4536-bb12-cd53bbc3f251",
+		"name": "natixis",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "31396940"
+	},
+	"item": [
+		{
+			"name": "create_embeddings - local - openai",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-api-key",
+						"value": "key123"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"client\": \"natixis\",\n    \"project\": \"test\",\n    \"region\": \"northeast\",\n    \"fund_name\": \"colorado-pension\",\n    \"date\": \"2019-12-01\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "0.0.0.0:8001/create_embeddings",
+					"host": [
+						"0",
+						"0",
+						"0",
+						"0"
+					],
+					"port": "8001",
+					"path": [
+						"create_embeddings"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "query - local - openai",
+			"request": {
+				"auth": {
+					"type": "apikey"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-api-key",
+						"value": "key123"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"client\": \"denis-test\",\n    \"project\": \"test\",\n    \"query\": \"what are the funds views on esg\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "0.0.0.0:8001/query",
+					"host": [
+						"0",
+						"0",
+						"0",
+						"0"
+					],
+					"port": "8001",
+					"path": [
+						"query"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
