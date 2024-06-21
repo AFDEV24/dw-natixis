@@ -19,7 +19,7 @@ class PineconeMetadata(FundMetadata):
         Returns:
             str: A formatted string containing all the fields of PineconeMetadata.
         """
-        return "Metadata:\n" + self.to_string_except_text() + "\nContext:\n" + self.text
+        return "\nMetadata:\n" + self.to_string_except_text() + "\nText:\n" + self.text
 
     def to_string_except_text(self) -> str:
         """
