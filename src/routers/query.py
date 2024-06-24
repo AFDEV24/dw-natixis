@@ -5,8 +5,6 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from openai import AuthenticationError
-from openai.types.chat.chat_completion_system_message_param import ChatCompletionSystemMessageParam
-from openai.types.chat.chat_completion_user_message_param import ChatCompletionUserMessageParam
 from pinecone.exceptions import UnauthorizedException
 
 from src import DIMENSIONS, ENV
@@ -17,7 +15,8 @@ from src.models.response import QueryResponse
 from src.utils.connections import get_cohere_client, get_openai_client, get_pinecone_index
 from src.utils.embeddings import embed_openai
 from src.utils.logger import get_logger
-from src.utils.parsers import rerank
+from src.utils.llm_calls import rerank, openai_chat
+from src.utils.prompt_builder import build_user_query_prompt, build_reformulation_prompt
 
 router = APIRouter()
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
@@ -30,8 +29,8 @@ chat_history = ChatHistory()
 @router.post("/query")
 async def query(request: QueryRequest) -> QueryResponse:
     """
-    Embeds the user query, search Pinecone for relevant records, reranks the records and generate a response
-    using OpenAI.
+    Reformulate user query with chat history, embeds the user query, search Pinecone for relevant records,
+    reranks the records and generate a response using OpenAI.
 
     Args:
         request (QueryRequest): The request object containing the query, client, and project information.
@@ -45,11 +44,19 @@ async def query(request: QueryRequest) -> QueryResponse:
     # Use chat history to reformulate question
     exchanges = chat_history.get(request.chat_id)
     if exchanges:
-        user_query = chat_history.reformulate_query(openai_client, request.chat_id, request.query)
-        logger.info(f"Reformulated user query from {request.query} -> {user_query}")
-        logger.debug(
-            f"Chat history of length {len(exchanges)} used:\n{chat_history.exchanges_to_string(request.chat_id)}"
+        formatted_exchanges = chat_history.format_exchanges(exchanges)
+        user_query = await openai_chat(
+            openai_client=openai_client,
+            model=ENV["REFORMULATION_MODEL"],
+            prompt=build_reformulation_prompt(exchanges=formatted_exchanges, query=request.query),
+            temperature=float(ENV["TEMPERATURE"]),
+            default_idk="",
         )
+        logger.info(f"Reformulated user query from {request.query} -> {user_query}")
+        logger.debug(f"Chat history of length {len(exchanges)} used:\n{formatted_exchanges}")
+        if user_query == "":
+            logger.error("Failed to reformulate user query!")
+            raise HTTPException(status_code=500, detail="Reformulation failed.")
 
     # Embed question
     embedded_queries = await embed_openai(openai_client, user_query, DIMENSIONS[ENV["EMBEDDING_MODEL"]])
@@ -75,14 +82,14 @@ async def query(request: QueryRequest) -> QueryResponse:
     logger.info(f"Retreived {len(matches)} matches from vector store.")
     ranked_records: list[PineconeRecord] = await rerank(get_cohere_client(), user_query, matches)
 
-    # Pass prompt to LLM
     try:
-        stream = openai_client.chat.completions.create(
+        # Query LLM
+        answer = await openai_chat(
+            openai_client=openai_client,
+            prompt=build_user_query_prompt(request, ranked_records),
             model=ENV["CHAT_MODEL"],
-            messages=_construct_prompt(request, ranked_records),
             temperature=float(ENV["TEMPERATURE"]),
         )
-        answer = stream.choices[0].message.content if stream.choices[0].message.content else "I don't know."  # Temp
         chat_history.put(request.chat_id, chat_exchange=ChatExchange(question=request.query, answer=answer))
     except UnauthorizedException:
         raise HTTPException(status_code=401, detail=f"Unauthorized key for Pinecone index for client {request.client}.")
@@ -112,35 +119,3 @@ def _process_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     metadata["file_creation_date"] = metadata["date"]
     metadata.pop("date")
     return metadata
-
-
-def _construct_prompt(
-    request: QueryRequest, records: list[PineconeRecord]
-) -> list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]:
-    """
-    Constructs a prompt for the chat completion model based on the query request and ranked records.
-
-    Args:
-        request (QueryRequest): The request object containing the query and other relevant information.
-        records (list[PineconeRecord]): A list of PineconeRecord instances to be used as context for the prompt.
-
-    Returns:
-        list[ChatCompletionUserMessageParam | ChatCompletionSystemMessageParam]:
-        A list containing the system and user prompts for the chat completion model.
-    """
-    prompt_path = Path(__file__).parent.parent / "prompts" / "query"
-    system_prompt_path = prompt_path / "system.json"
-    user_prompt_path = prompt_path / "user.json"
-
-    with open(system_prompt_path, "r") as file:
-        system_content: str = json.load(file)["content"]
-        system_prompt = ChatCompletionSystemMessageParam(role="system", content=system_content)
-    with open(user_prompt_path, "r") as file:
-        user_content: str = json.load(file)["content"].format(
-            question=request.query,
-            context=[str(record.metadata) for record in records],
-            today=datetime.today().strftime("%Y-%m-%d"),
-        )
-        user_prompt = ChatCompletionUserMessageParam(role="user", content=user_content)
-    logger.debug(f"Prompt created -\nSystem: {system_prompt}\nUser: {user_prompt}")
-    return [system_prompt, user_prompt]
