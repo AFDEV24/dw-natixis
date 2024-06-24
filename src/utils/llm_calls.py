@@ -5,7 +5,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from src import ENV
 from src.models.pinecone import PineconeRecord
-from src.utils.connections import get_cohere_client, OpenAIClient
+from src.utils.connections import OpenAIClient
 from src.utils.decorators import async_retry
 from src.utils.logger import get_logger
 
