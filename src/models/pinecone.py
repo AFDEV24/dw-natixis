@@ -17,7 +17,7 @@ class PineconeMetadata(FundMetadata):
         Returns a formatted string representation of the PineconeMetadata fields.
 
         Returns:
-            str: A formatted string containing all the fields of PineconeMetadata.
+            str: String formatted metadata fields and text.
         """
         return "\nMetadata:\n" + self.to_string_except_text() + "\nText:\n" + self.text
 
