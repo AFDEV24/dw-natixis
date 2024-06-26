@@ -6,6 +6,7 @@ from typing import Iterable
 
 from src import ENV
 from src.utils.logger import get_logger
+from src.utils.tokens import count_tokens
 
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
@@ -24,16 +25,13 @@ class ChatHistory:
 
     Attributes:
         max_tokens (int): The maximum number of tokens allowed in the chat history.
-        chat_length_limit_check (int): The maximum number of exchanges to check for token limits.
         recorded_histories (dict): A dictionary storing chat histories with chat IDs as keys.
         tokenizer: The tokenizer used to count tokens in the chat exchanges.
     """
 
-    def __init__(self, max_tokens: int = 12000, chat_length_limit_check: int = 10) -> None:
+    def __init__(self, max_tokens: int = 60000) -> None:
         self.max_tokens = max_tokens
-        self.chat_length_limit_check = chat_length_limit_check
         self.recorded_histories: dict[str, deque[ChatExchange]] = {}
-        self.tokenizer = tiktoken.encoding_for_model(ENV["REFORMULATION_MODEL"])
 
     def get(self, chat_id: str) -> list[ChatExchange]:
         """
@@ -48,19 +46,16 @@ class ChatHistory:
         exchanges = self.recorded_histories.get(chat_id, deque())
         exchanges.append(chat_exchange)
 
-        if len(exchanges) > self.chat_length_limit_check:
-            while self._count_tokens(exchanges) > self.max_tokens:
-                exchanges.popleft()
-        self.recorded_histories[chat_id] = exchanges
+        model_name = ENV["REFORMULATION_MODEL"]
+        token_count: int = sum(
+            [count_tokens(model_name, [exchange.question, exchange.answer]) for exchange in exchanges]
+        )
+        while token_count > self.max_tokens:
+            oldest_exchange = exchanges.popleft()
+            oldest_exchange_token_count = count_tokens(model_name, [oldest_exchange.question, oldest_exchange.answer])
+            token_count -= oldest_exchange_token_count
 
-    def _count_tokens(self, exchanges: deque[ChatExchange]) -> int:
-        """
-        Counts the total number of tokens in a list of chat exchanges.
-        """
-        total_tokens = 0
-        for exchange in exchanges:
-            total_tokens += len(self.tokenizer.encode(exchange.question)) + len(self.tokenizer.encode(exchange.answer))
-        return total_tokens
+        self.recorded_histories[chat_id] = exchanges
 
     def format_exchanges(self, exchanges: Iterable[ChatExchange]) -> str:
         """

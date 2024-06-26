@@ -8,6 +8,7 @@ from src.models.pinecone import PineconeRecord
 from src.utils.connections import OpenAIClient
 from src.utils.decorators import async_retry
 from src.utils.logger import get_logger
+from src.utils.tokens import count_tokens
 
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
@@ -41,7 +42,7 @@ async def rerank(
         top_n=top_n,
         return_documents=False,
     ).results
-    logger.info(f"Reranked chunks -> {[record.index for record in ranked_records]}")
+    logger.info(f"Reranked to top {len(ranked_records)} chunks -> {[record.index for record in ranked_records]}")
     return [records[record.index] for record in ranked_records]
 
 
@@ -53,9 +54,13 @@ async def openai_chat(
     temperature: float,
     default_idk: str = "I dont know.",
 ) -> str:
+    contents: list[str] = [chat["content"] for chat in prompt if "content" in chat and isinstance(chat["content"], str)]
+    logger.info(f"Token count for question: {count_tokens(model, contents)}")
     answer = openai_client.chat.completions.create(
         model=model,
         messages=prompt,
         temperature=temperature,
     )
-    return answer.choices[0].message.content if answer.choices[0].message.content else default_idk
+    answer_str = answer.choices[0].message.content if answer.choices[0].message.content else default_idk
+    logger.info(f"Token count for answer: {count_tokens(model, [answer_str])}")
+    return answer_str

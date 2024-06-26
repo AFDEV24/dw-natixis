@@ -18,7 +18,7 @@ def parse_pdf(file: Path) -> list[str]:
 
 
 async def statistically_chunk_content(
-    contents: list[str], encoding_name: str = ENV["EMBEDDING_MODEL"]
+    pages: list[str], encoding_name: str = ENV["EMBEDDING_MODEL"]
 ) -> list[tuple[int, str]]:
     """
     Statistically splits document into smaller chunks to optimize for semantic meaning of each chunk.
@@ -38,9 +38,9 @@ async def statistically_chunk_content(
         max_split_tokens=500,
         split_tokens_tolerance=20,
     )
-    chunked_contents: list[list[Chunk]] = chunker(docs=contents)
+    chunked_pages: list[list[Chunk]] = chunker(docs=pages)
     return [
         (int(page_num) + 1, chunk.content)
-        for page_num, page_chunks in enumerate(chunked_contents)
+        for page_num, page_chunks in enumerate(chunked_pages)
         for chunk in page_chunks
     ]

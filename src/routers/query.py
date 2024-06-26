@@ -58,7 +58,7 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     # Embed question
     embedded_queries = await embed_openai(openai_client, user_query, DIMENSIONS[ENV["EMBEDDING_MODEL"]])
-    embedded_query: list[float] = embedded_queries[0]  # Only embedded 1 query
+    embedded_query: list[float] = embedded_queries[0]  # Only embedded 1 query for now
 
     # Query Pinecone
     index = await get_pinecone_index(request.client)
