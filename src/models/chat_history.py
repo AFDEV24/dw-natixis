@@ -33,11 +33,11 @@ class ChatHistory:
         self.max_tokens = max_tokens
         self.recorded_histories: dict[str, deque[ChatExchange]] = {}
 
-    def get(self, chat_id: str) -> list[ChatExchange]:
+    def get(self, chat_id: str | None) -> list[ChatExchange] | None:
         """
         Retrieves the chat history for a given chat ID.
         """
-        return list(self.recorded_histories.get(chat_id, []))
+        return list(self.recorded_histories.get(chat_id, [])) if chat_id else None
 
     def put(self, chat_id: str, chat_exchange: ChatExchange) -> None:
         """

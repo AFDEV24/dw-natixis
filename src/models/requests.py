@@ -12,4 +12,4 @@ class QueryRequest(BaseModel):
     client: str
     project: str
     query: str
-    chat_id: str
+    chat_id: str | None = None
