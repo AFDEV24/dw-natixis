@@ -5,18 +5,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter
-from pinecone import Index, Vector
+from pinecone import Vector
 
 from src import DIMENSIONS, ENV
 from src.models.pinecone import PineconeMetadata, PineconeRecord
 from src.models.requests import CreateEmbeddingsRequest
 from src.models.response import CreateEmbeddingsResponse
-from src.utils.connections import OpenAIClient, get_openai_client, get_pinecone_index
+from src.utils.connections import OpenAIClient, get_openai_client
 from src.utils.decorators import async_retry
 from src.utils.embeddings import embed_openai
 from src.utils.hashers import hash_string
 from src.utils.logger import get_logger
 from src.utils.parsers import parse_pdf, statistically_chunk_content
+from src.utils.pinecone import PineconeIndex
 
 ETC_PATH: Path = Path(__file__).parent.parent.parent / "etc"
 router = APIRouter()
@@ -35,7 +36,6 @@ async def create_embeddings(request: CreateEmbeddingsRequest) -> CreateEmbedding
         CreateEmbeddingsResponse: The response containing the IDs of the uploaded documents and a success message.
     """
     openai_client = get_openai_client()
-    pc_index = await get_pinecone_index(request.client)
 
     # TODO: REMOVE HARD CODED PATH FOR FILES WHEN FILE FETCHING IS IMPLEMENTED
     samples_path = ETC_PATH / "sample_files" / request.fund_name
@@ -50,12 +50,14 @@ async def create_embeddings(request: CreateEmbeddingsRequest) -> CreateEmbedding
         except Exception as e:
             logger.error(f"Error occurred when parsing pdf '{file_name}':\n{e}")
 
-        chunks: list[tuple[int, str]] = await statistically_chunk_content(parsed_pdf)
+        chunks: list[tuple[int, str]] = statistically_chunk_content(parsed_pdf)
         logger.info(f"Split content into {len(chunks)} chunks.")
 
         records = _create_records(request, chunks, file_name, timestamp, _extract_date_from_title(file_name))
         merged_vectors = await _merge_with_metadata(openai_client, records)
-        await _upload_to_pinecone(pc_index, merged_vectors, request.project)
+
+        index = PineconeIndex(request.client)
+        await index.upsert(merged_vectors, request.project)
 
         response_files[file_name] = (len(records), timestamp)
 
@@ -160,21 +162,3 @@ async def _merge_with_metadata(openai_client: OpenAIClient, records: list[Pineco
         )
         for idx, vector in enumerate(concate_vectors)
     ]
-
-
-@async_retry(logger=logger, max_attempts=2, initial_delay=1, backoff_base=2)
-async def _upload_to_pinecone(index: Index, vectors: list[Vector], project: str) -> None:
-    """
-    Upload vectors to the Pinecone index.
-
-    Args:
-        index (Index): The Pinecone index to upload vectors to.
-        vectors (List[Vector]): A list of vectors to be uploaded.
-        project (str): The namespace/project in the Pinecone index where the vectors will be stored.
-
-    Returns:
-        None
-    """
-    start = time.time()
-    index.upsert(vectors, namespace=project)
-    logger.info(f"Took {round(time.time()-start, 2)}s to upsert {len(vectors)} entries to Index '{project}'.")
